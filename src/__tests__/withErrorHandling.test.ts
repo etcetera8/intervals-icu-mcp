@@ -11,11 +11,11 @@ vi.mock("../client.js", async (importOriginal) => {
   return { ...actual, get: vi.fn(), post: vi.fn(), put: vi.fn(), postFile: vi.fn() };
 });
 
-function makeAxiosError(status: number | null): AxiosError {
+function makeAxiosError(status: number | null, data: unknown = null): AxiosError {
   const err = new AxiosError("test error");
   if (status !== null) {
     // @ts-expect-error — minimal AxiosResponse mock
-    err.response = { status, data: null, headers: {}, config: {}, statusText: String(status) };
+    err.response = { status, data, headers: {}, config: {}, statusText: String(status) };
   }
   return err;
 }
@@ -75,5 +75,34 @@ describe("withErrorHandling", () => {
     const result = await withErrorHandling(handler)({});
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("unexpected boom");
+  });
+});
+
+describe("withErrorHandling — API detail", () => {
+  it("includes the response body for an unexpected 4xx such as a 422", async () => {
+    const err = makeAxiosError(422, { error: "start_date_local must be a datetime" });
+    const result = await withErrorHandling(vi.fn().mockRejectedValue(err))({});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("422");
+    expect(result.content[0].text).toContain("start_date_local must be a datetime");
+  });
+
+  it("accepts a plain-text body and truncates long ones", async () => {
+    const err = makeAxiosError(400, "x".repeat(1000));
+    const result = await withErrorHandling(vi.fn().mockRejectedValue(err))({});
+    expect(result.content[0].text.length).toBeLessThan(400);
+  });
+
+  it("still returns the original message when there is no body", async () => {
+    const result = await withErrorHandling(vi.fn().mockRejectedValue(makeAxiosError(422)))({});
+    expect(result.content[0].text).toBe("422: Unexpected API error");
+  });
+
+  it("never leaks the request config or credentials", async () => {
+    const err = makeAxiosError(422, { error: "bad" });
+    // @ts-expect-error — attach a config with credentials the way axios does
+    err.config = { auth: { username: "API_KEY", password: "super-secret" } };
+    const result = await withErrorHandling(vi.fn().mockRejectedValue(err))({});
+    expect(result.content[0].text).not.toContain("super-secret");
   });
 });

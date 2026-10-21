@@ -1,12 +1,35 @@
 import { z } from "zod";
 import { get, put, postFile, athleteId, withErrorHandling } from "../client.js";
-import { isoDate, jsonResult } from "../utils.js";
+import { isoDate, jsonResult, pick } from "../utils.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+
+const ACTIVITY_LIST_KEYS = [
+  "id",
+  "start_date_local",
+  "type",
+  "name",
+  "distance",
+  "moving_time",
+  "icu_training_load",
+  "icu_intensity",
+  "icu_ctl",
+  "icu_atl",
+  "average_heartrate",
+  "max_heartrate",
+  "icu_average_watts",
+  "icu_weighted_avg_watts",
+  "perceived_exertion",
+  "feel",
+  "race",
+  "commute",
+  "trainer",
+] as const;
 
 export async function listActivities(params: {
   oldest?: string;
   newest?: string;
   limit?: number;
+  full?: boolean;
 }) {
   const today = new Date();
   const thirtyDaysAgo = new Date(today);
@@ -17,7 +40,9 @@ export async function listActivities(params: {
     newest: params.newest ?? isoDate(today),
     limit: params.limit ?? 20,
   });
-  return jsonResult(data);
+  // Raw activities are ~250 lines each; use get_activity for the full record of one.
+  if (params.full || !Array.isArray(data)) return jsonResult(data);
+  return jsonResult(data.map((a) => pick(a as Record<string, unknown>, ACTIVITY_LIST_KEYS)));
 }
 
 export async function getActivity(params: { activityId: string }) {
@@ -63,11 +88,13 @@ export function registerActivityTools(server: McpServer) {
   server.registerTool(
     "list_activities",
     {
-      description: "List recent activities. Returns summaries with id, name, date, sport, distance, duration, and TSS.",
+      description:
+        "List recent activities. Returns compact summaries (id, name, date, sport, distance, duration, load, intensity, avg/max HR, avg/normalized power, RPE); pass full=true for the raw records, or use get_activity for one activity in detail.",
       inputSchema: {
         oldest: z.string().optional().describe("Start date (YYYY-MM-DD). Defaults to 30 days ago."),
         newest: z.string().optional().describe("End date (YYYY-MM-DD). Defaults to today."),
         limit: z.number().int().min(1).max(200).default(20).describe("Max number of activities to return."),
+        full: z.boolean().optional().describe("Return the raw API records instead of the compact view."),
       },
     },
     withErrorHandling(listActivities)

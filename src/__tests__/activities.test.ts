@@ -149,3 +149,43 @@ describe("update_activity", () => {
     expect(client.put).toHaveBeenCalledWith("/activity/abc123", {});
   });
 });
+
+describe("list_activities — compact output", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const raw = [
+    {
+      id: "i199159743",
+      start_date_local: "2026-10-19T10:10:32",
+      type: "Run",
+      name: "Eugene Running",
+      icu_training_load: 38,
+      average_heartrate: 125,
+      average_stance_time: 274.1,
+      average_vertical_oscillation: 78.3,
+      icu_ftp: null,
+      gear: { id: "g1" },
+    },
+  ];
+
+  it("returns only the headline fields by default", async () => {
+    vi.mocked(client.get).mockResolvedValue(raw);
+    const result = await listActivities({});
+    expect(JSON.parse(result.content[0].text)).toEqual([
+      {
+        id: "i199159743",
+        start_date_local: "2026-10-19T10:10:32",
+        type: "Run",
+        name: "Eugene Running",
+        icu_training_load: 38,
+        average_heartrate: 125,
+      },
+    ]);
+  });
+
+  it("returns raw records when full=true", async () => {
+    vi.mocked(client.get).mockResolvedValue(raw);
+    const result = await listActivities({ full: true });
+    expect(JSON.parse(result.content[0].text)).toEqual(raw);
+  });
+});

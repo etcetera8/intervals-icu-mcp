@@ -47,17 +47,36 @@ export async function postFile<T>(path: string, filePath: string, fields?: Recor
   return data;
 }
 
+// The response body from intervals.icu usually says why a request was rejected
+// (e.g. a 422 on a malformed date). Only the body is surfaced, never the request
+// config, so the API key can't leak into tool output.
+function apiDetail(data: unknown): string {
+  if (data === null || data === undefined || data === "") return "";
+  let text: string;
+  if (typeof data === "string") {
+    text = data;
+  } else {
+    try {
+      text = JSON.stringify(data);
+    } catch {
+      return "";
+    }
+  }
+  text = text.replace(/\s+/g, " ").trim();
+  return text ? ` — ${text.slice(0, 300)}` : "";
+}
+
 function formatApiError(err: unknown): string {
   if (err instanceof AxiosError) {
     if (!err.response) {
       return "Network error: could not reach intervals.icu — check your internet connection";
     }
-    const { status } = err.response;
+    const { status, data } = err.response;
     if (status === 401 || status === 403) return "401/403: Invalid API key or access denied — check INTERVALS_API_KEY in your config";
-    if (status === 404) return "404: Resource not found — check the ID you provided";
+    if (status === 404) return `404: Resource not found — check the ID you provided${apiDetail(data)}`;
     if (status === 429) return "429: Rate limited — wait a moment and try again";
     if (status >= 500) return `${status}: Intervals.icu server error — try again later`;
-    return `${status}: Unexpected API error`;
+    return `${status}: Unexpected API error${apiDetail(data)}`;
   }
   if (err instanceof Error) return `Unexpected error: ${err.message}`;
   return "Unexpected error";

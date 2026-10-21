@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { listEvents, createEvent, updateEvent } from "../tools/calendar.js";
+import { listEvents, createEvent, updateEvent, compactEvent } from "../tools/calendar.js";
 
 vi.mock("../client.js", () => ({
   athleteId: () => "0",
@@ -29,8 +29,8 @@ describe("list_events", () => {
 
   it("returns events as JSON text", async () => {
     const mockEvents = [
-      { id: "evt1", name: "Threshold Intervals", date: "2024-06-05" },
-      { id: "evt2", name: "Long Ride", date: "2024-06-08" },
+      { id: 1, name: "Threshold Intervals", start_date_local: "2024-06-05T00:00:00" },
+      { id: 2, name: "Long Ride", start_date_local: "2024-06-08T00:00:00" },
     ];
     vi.mocked(client.get).mockResolvedValue(mockEvents);
 
@@ -67,7 +67,7 @@ describe("create_event", () => {
     expect(client.post).toHaveBeenCalledWith(
       "/athlete/0/events",
       expect.objectContaining({
-        start_date_local: "2024-06-30",
+        start_date_local: "2024-06-30T00:00:00",
         category: "WORKOUT",
         indoor: false,
       })
@@ -97,7 +97,7 @@ describe("create_event", () => {
     });
 
     expect(client.post).toHaveBeenCalledWith("/athlete/0/events", {
-      start_date_local: "2024-07-04",
+      start_date_local: "2024-07-04T00:00:00",
       name: "Independence Day Race",
       category: "RACE_A",
       type: "Run",
@@ -166,7 +166,7 @@ describe("update_event", () => {
     await updateEvent({ eventId: 7, movingTime: 5400, startDateLocal: "2024-08-01" });
 
     const body = vi.mocked(client.put).mock.calls[0][1] as Record<string, unknown>;
-    expect(body).toEqual({ moving_time: 5400, start_date_local: "2024-08-01" });
+    expect(body).toEqual({ moving_time: 5400, start_date_local: "2024-08-01T00:00:00" });
   });
 
   it("returns the API response as MCP content JSON", async () => {
@@ -182,5 +182,74 @@ describe("update_event", () => {
     vi.mocked(client.put).mockRejectedValue(new Error("Not found"));
 
     await expect(updateEvent({ eventId: 999, name: "x" })).rejects.toThrow("Not found");
+  });
+});
+
+describe("event date handling", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("promotes a bare date to local midnight on create (the API 422s on bare dates)", async () => {
+    vi.mocked(client.post).mockResolvedValue({ id: 1 });
+    await createEvent({ startDateLocal: "2026-10-22", name: "x" });
+    const body = vi.mocked(client.post).mock.calls[0][1] as Record<string, unknown>;
+    expect(body.start_date_local).toBe("2026-10-22T00:00:00");
+  });
+
+  it("passes an explicit local datetime through unchanged", async () => {
+    vi.mocked(client.post).mockResolvedValue({ id: 1 });
+    await createEvent({ startDateLocal: "2026-10-22T06:30:00", name: "x" });
+    const body = vi.mocked(client.post).mock.calls[0][1] as Record<string, unknown>;
+    expect(body.start_date_local).toBe("2026-10-22T06:30:00");
+  });
+
+  it("promotes a bare date on update and leaves a datetime alone", async () => {
+    vi.mocked(client.put).mockResolvedValue({ id: 1 });
+    await updateEvent({ eventId: 1, startDateLocal: "2026-10-23" });
+    await updateEvent({ eventId: 1, startDateLocal: "2026-10-23T07:00:00" });
+    expect((vi.mocked(client.put).mock.calls[0][1] as any).start_date_local).toBe("2026-10-23T00:00:00");
+    expect((vi.mocked(client.put).mock.calls[1][1] as any).start_date_local).toBe("2026-10-23T07:00:00");
+  });
+});
+
+describe("compactEvent", () => {
+  const raw = {
+    id: 146900205,
+    start_date_local: "2026-10-22T00:00:00",
+    name: "TEST - coach",
+    category: "WORKOUT",
+    type: "Ride",
+    moving_time: 1800,
+    icu_training_load: 16,
+    icu_intensity: 56.57,
+    description: "- 30m 60%",
+    push_errors: null,
+    uid: "f1bb3583",
+    athlete_id: "9560317",
+    workout_doc: {
+      steps: [{ power: { units: "%ftp", value: 60 }, duration: 1800 }],
+      duration: 1800,
+      average_watts: 186,
+      normalized_power: 188,
+      zoneTimes: [{ id: "Z1", secs: 600 }],
+      strain_score: { ss_cp: 25 },
+    },
+  };
+
+  it("keeps the schedule, steps and headline numbers", () => {
+    const out = compactEvent(raw) as Record<string, any>;
+    expect(out).toMatchObject({ id: 146900205, name: "TEST - coach", icu_training_load: 16 });
+    expect(out.workout_doc).toEqual({
+      steps: raw.workout_doc.steps,
+      duration: 1800,
+      average_watts: 186,
+      normalized_power: 188,
+    });
+  });
+
+  it("drops ids, zone tables and nulls", () => {
+    const text = JSON.stringify(compactEvent(raw));
+    expect(text).not.toContain("zoneTimes");
+    expect(text).not.toContain("uid");
+    expect(text).not.toContain("push_errors");
   });
 });
