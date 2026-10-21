@@ -23,7 +23,7 @@ Connect Claude to your [Intervals.icu](https://intervals.icu) training data. Ask
 
 **With Git:**
 ```bash
-git clone https://github.com/willtheodore/intervals-icu-mcp.git
+git clone https://github.com/etcetera8/intervals-icu-mcp.git
 cd intervals-icu-mcp
 ```
 
